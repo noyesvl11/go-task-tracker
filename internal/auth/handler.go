@@ -30,13 +30,14 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	token, _ := GenerateJWT(u.ID)
+	token, _ := GenerateJWT(u.ID, u.Role)
 	c.JSON(http.StatusOK, gin.H{"token": token})
 }
 func Register(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Role     string `json:"role"` // admin, teacher, student
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil || req.Username == "" || req.Password == "" {
@@ -44,27 +45,36 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// Check if user already exists
+	if req.Role == "" {
+		req.Role = "student" // по умолчанию
+	} else if req.Role != "admin" && req.Role != "teacher" && req.Role != "student" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role"})
+		return
+	}
+
+	// Проверка, существует ли пользователь
 	var existing user.User
 	if err := db.DB.Where("username = ?", req.Username).First(&existing).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Username already taken"})
 		return
 	}
 
-	// Hash password
+	// Хеширование пароля
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
 	}
 
-	// Create new user
+	// Создание нового пользователя
 	u := user.User{
 		Username: req.Username,
 		Password: string(hashedPassword),
+		Role:     req.Role,
 	}
 	if err := db.DB.Create(&u).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		// Логируем ошибку для более подробной информации
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user", "details": err.Error()})
 		return
 	}
 
